@@ -42,8 +42,41 @@ Phase 1: nothing downstream will ever talk to Redis directly again.
 - [ ] You've watched it run long enough to see a few `[FRAUD]` tagged transactions and can
       describe the two injected fraud patterns (spike, new-device+new-location)
 
-## Next: Phase 2
+## Phase 2 — Baseline model (no FL, no GAN yet)
 
-Pull ~5,000 transactions off the stream, save to a CSV/DataFrame, and train a baseline XGBoost
-classifier — no Federated Learning, no GAN yet. Get real precision/recall numbers on a simple
-model before adding complexity. Ask Claude to help set this up when you're ready.
+```bash
+python training/generate_dataset.py   # builds data/transactions.csv (~20k rows, ~2% fraud)
+python training/train_baseline.py     # trains + evaluates + saves models/baseline_xgb.pkl
+```
+
+- **`common/features.py`** — turns raw transaction fields into per-user relative features
+  (e.g. `amount_ratio_to_user_avg`, `device_freq_for_user`) instead of raw high-cardinality IDs.
+  Used by both training and (later) the real-time inference service, so features are computed
+  identically in both places.
+- **`training/generate_dataset.py`** — batch version of the same fraud logic used by
+  `generator/simulate.py`, but produces a static CSV instead of a live stream (training needs a
+  finished dataset, not an infinite one).
+- **`training/train_baseline.py`** — trains an XGBoost classifier with `scale_pos_weight` to
+  handle the ~2% fraud imbalance, evaluated on precision/recall/F1/PR-AUC (not accuracy — with
+  this little fraud, "always predict normal" would already score ~98% accuracy).
+
+### Baseline results (keep these — you'll compare Phase 4's GAN-augmented version against them)
+
+| Metric | Value |
+|---|---|
+| Precision (fraud) | 0.68 |
+| Recall (fraud) | 0.93 |
+| F1 (fraud) | 0.78 |
+| ROC-AUC | 0.999 |
+| PR-AUC | 0.947 |
+
+Note: the generator's fraud patterns were deliberately given some overlap with normal behavior
+(occasional legit new-device use, occasional large legit purchases) — an earlier version without
+that overlap scored a *suspicious* 100% across the board, which would read as data leakage to an
+interviewer, not skill. Realistic-but-imperfect numbers are the more defensible result.
+
+## Next: Phase 3
+
+Train a GAN (CTGAN) on the fraud-labeled rows only, generate synthetic fraud examples, mix them
+into training, and compare against the baseline table above. Ask Claude to help set this up when
+you're ready.
